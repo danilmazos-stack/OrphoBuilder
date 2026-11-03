@@ -31,7 +31,7 @@ def _prepare(img: Image.Image) -> Image.Image:
 
 def read_text(path: str) -> str:
     try:
-        img = _prepare(Image.open(path))
+        img = _prepare(path if isinstance(path, Image.Image) else Image.open(path))
         data = pytesseract.image_to_data(
             img, lang=LANGS, config=CONFIG, output_type=pytesseract.Output.DICT
         )

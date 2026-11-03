@@ -6,11 +6,12 @@ from ocr import read_text, OcrError
 from functools import lru_cache
 import spell
 import requests
+from extract import read_any
 
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 TAGS_URL = "http://localhost:11434/api/tags"
-MODEL = "qwen3.5:4b"  # впишите свою модель из ollama list
+MODEL = "qwen3:4b"  # впишите свою модель из ollama list
 TIMEOUT = 300
 
 SKIP_CLEAN = True            # не отправлять модели предложения без подозрительных слов
@@ -270,3 +271,15 @@ def list_models() -> list[str]:
         return [m["name"] for m in r.json()["models"]]
     except requests.exceptions.RequestException:
         return []
+
+def fix_file_iter(path: str, model: str = MODEL, show_changes: bool = False):
+    yield "Читаю файл..."
+    try:
+        text = read_any(path).strip()
+    except Exception as e:
+        yield f"Не удалось прочитать файл: {e}"
+        return
+    if not text:
+        yield "В файле не найден текст."
+        return
+    yield from fix_text_iter(text, model, show_changes)

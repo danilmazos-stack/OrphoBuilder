@@ -1,5 +1,5 @@
 import gradio as gr
-from ollama_client import fix_text_iter, fix_image_iter, list_models, MODEL
+from ollama_client import fix_text_iter, fix_image_iter, fix_file_iter, list_models, MODEL
 
 EXAMPLES = [
     ["Я вчира пошол в магазин и купил хлеп."],
@@ -31,10 +31,16 @@ def refresh_models():
     models = get_models()
     return gr.Dropdown(choices=models, value=models[0])
 
+def process_file(path, model, show_changes):
+    if not path:
+        yield "Загрузите файл."
+        return
+    yield from fix_file_iter(path, model, show_changes)
+
 
 with gr.Blocks(title="Исправление ошибок") as demo:
     gr.Markdown(
-        "# Исправление ошибок\n"
+        "# OrphoBuilder\n"
         "Проверка орфографии и грамматики в тексте и на картинках (русский и английский)."
     )
 
@@ -78,6 +84,16 @@ with gr.Blocks(title="Исправление ошибок") as demo:
 
         img_btn.click(process_image, [img_in, model, show_changes], img_out)
         img_clear.click(lambda: (None, ""), None, [img_in, img_out])
+
+    with gr.Tab("Файл"):
+        with gr.Row():
+            with gr.Column():
+                file_in = gr.File(label="Файл (.docx, .pdf, .txt, картинка)", type="filepath")
+                file_btn = gr.Button("Исправить", variant="primary")
+            with gr.Column():
+                file_out = gr.Textbox(label="Результат", lines=14, buttons=["copy"])
+        file_btn.click(process_file, [file_in, model, show_changes], file_out)
+
 
 if __name__ == "__main__":
     demo.launch(theme=gr.themes.Soft(), inbrowser=True)
