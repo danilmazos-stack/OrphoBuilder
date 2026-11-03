@@ -2,10 +2,11 @@ import re
 from pathlib import Path
 
 import docx   # это python-docx
-import pymupdf   # это PyMuPDF
+import pymupdf # это и есть PyMuPDF (MuPDF)
 from PIL import Image
 
 from ocr import read_text, OcrError
+
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
 

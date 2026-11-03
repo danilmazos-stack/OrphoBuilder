@@ -8,15 +8,14 @@ import spell
 import requests
 from extract import read_any
 
-
 OLLAMA_URL = "http://localhost:11434/api/chat"
 TAGS_URL = "http://localhost:11434/api/tags"
-MODEL = "qwen3:4b"  # впишите свою модель из ollama list
+MODEL = "qwen2.5:3b"  # впишите свою модель из ollama list
 TIMEOUT = 300
 
-SKIP_CLEAN = True            # не отправлять модели предложения без подозрительных слов
-PROTECT_KNOWN_WORDS = True   # не менять слова, которые есть в словаре
-SHOW_RECOGNIZED = False      # True: показывать текст, прочитанный с картинки
+SKIP_CLEAN = True  # не отправлять модели предложения без подозрительных слов
+PROTECT_KNOWN_WORDS = False  # РАЗРЕШИТЬ модели менять слова, даже если они есть в словаре (важно для "слава" -> "слова")
+SHOW_RECOGNIZED = False  # True: показывать текст, прочитанный с картинки
 
 SYSTEM_PROMPT = (
     "You are a proofreader for Russian and English text. "
@@ -24,17 +23,12 @@ SYSTEM_PROMPT = (
     'and return it as JSON: {"corrected": "..."}.\n'
     "RULES:\n"
     "1. NEVER translate. Russian stays Russian, English stays English.\n"
-    "2. NEVER delete, add or reorder words. The output must contain the same words "
-    "as the input, only with the errors fixed.\n"
-    "3. If a word is misspelled or distorted, restore the real word it was meant to be, "
-    "using the sentence context and how the word sounds. "
-    "Never replace it with a word of a different meaning.\n"
+    "2. You MAY change a word if it is spelled correctly but makes NO sense in the context "
+    "(e.g., 'слава' instead of 'слова', 'луг' instead of 'лук'). Choose the word that fits the meaning.\n"
+    "3. NEVER delete, add or reorder words unnecessarily. Keep the original structure.\n"
     "4. Capitalize names and the first word of a sentence.\n"
     "5. Leave everything that is already correct exactly as it is, including digits and style.\n"
-    "6. If the message lists unknown words with possible fixes, replace such a word "
-    "ONLY with one of the listed candidates, chosen by the meaning of the sentence. "
-    "If the word is actually correct, keep it.\n"
-    "7. Output only the JSON, no comments."
+    "6. Output ONLY the JSON, no comments or explanations."
 )
 
 SCHEMA = {
@@ -48,6 +42,7 @@ EXAMPLES = [
     ("Their going to the store tomorow.", "They're going to the store tomorrow."),
     ("Иля и Витя лубят играть с сабакой.", "Илья и Витя любят играть с собакой."),
     ("мы живем в москве", "Мы живём в Москве"),
+    ("ты умеешь исправлять слава", "Ты умеешь исправлять слова"),
 ]
 
 PROMPT_OCR = (
@@ -86,7 +81,7 @@ def _candidates(word: str) -> frozenset:
 def _hints(text: str) -> str:
     lines, seen = [], set()
     for w in WORD_RE.findall(text):
-        if len(w) <= 2 or w.lower() in seen or _is_known(w):
+        if len(w) <= 2 or w.lower() in seen:
             continue
         seen.add(w.lower())
         cands = sorted(
@@ -100,25 +95,17 @@ def _hints(text: str) -> str:
 
 
 def _build_user(text: str) -> str:
-    hints = _hints(text)
-    if not hints:
-        return text
-    return (
-        text
-        + "\n\nUnknown words and possible fixes "
-        "(pick the one that fits the sentence, or keep the word if it is correct):\n"
-        + hints
-    )
+    # Просто отправляем текст модели, без лишних подсказок, чтобы не путать маленькую модель
+    return text
 
 
 def _pick(wa: str, wb: str) -> str:
     na, nb = _norm(wa), _norm(wb)
-    if na == nb:                  # изменился только регистр, ё или знаки
+    if na == nb:
         return wb
-    if _is_known(wa):             # слово верное: не даём его подменять
-        return wa if PROTECT_KNOWN_WORDS else wb
-    allowed = {_norm(c) for c in _candidates(wa)}
-    return wb if nb in allowed else wa   # замена только из кандидатов
+    if PROTECT_KNOWN_WORDS and _is_known(wa) and not _is_known(wb):
+        return wa
+    return wb
 
 
 def _guard(original: str, corrected: str) -> str:
@@ -126,9 +113,9 @@ def _guard(original: str, corrected: str) -> str:
     sm = difflib.SequenceMatcher(None, a, b, autojunk=False)
     out = []
     for op, i1, i2, j1, j2 in sm.get_opcodes():
-        if op in ("equal", "delete"):   # удалённые моделью слова возвращаем
+        if op in ("equal", "delete"):
             out.extend(a[i1:i2])
-        elif op == "insert":            # добавленные слова убираем
+        elif op == "insert":
             continue
         elif (i2 - i1) == (j2 - j1):
             for wa, wb in zip(a[i1:i2], b[j1:j2]):
@@ -150,8 +137,14 @@ def _post(messages: list[dict], model: str, schema: dict | None = None) -> str:
         "model": model,
         "stream": False,
         "think": False,
-        "keep_alive": "30m",
-        "options": {"temperature": 0, "num_predict": 300, "num_ctx": 4096},
+        "keep_alive": "5m", # Выгружать модель из памяти через 5 минут, чтобы освободить RAM/CPU
+        "options": {
+            "temperature": 0,       # 0 требует меньше вычислений, чем 0.5
+            "num_ctx": 512,         # БЫЛО 4096. Для исправления предложений 512 более чем достаточно!
+            "num_predict": 150,     # БЫЛО 500. Ограничиваем максимальную длину ответа
+            "top_k": 20,            # Дополнительные ограничения для ускорения CPU
+            "top_p": 0.9,
+        },
         "messages": messages,
     }
     if schema:
@@ -169,19 +162,21 @@ def _post(messages: list[dict], model: str, schema: dict | None = None) -> str:
 def _correct_chunk(text: str, model: str) -> str:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     for src, fixed in EXAMPLES:
-        messages.append({"role": "user", "content": _build_user(src)})
+        messages.append({"role": "user", "content": src})
         messages.append({
             "role": "assistant",
             "content": json.dumps({"corrected": fixed}, ensure_ascii=False),
         })
-    messages.append({"role": "user", "content": _build_user(text)})
+    messages.append({"role": "user", "content": text})
 
     raw = _post(messages, model, SCHEMA)
     try:
         corrected = json.loads(raw)["corrected"]
     except (json.JSONDecodeError, KeyError):
         return text
-    return _guard(text, corrected)
+
+    # Возвращаем ответ модели напрямую, без жёсткой фильтрации через _guard
+    return corrected
 
 
 def _needs_model(chunk: str) -> bool:
@@ -271,6 +266,7 @@ def list_models() -> list[str]:
         return [m["name"] for m in r.json()["models"]]
     except requests.exceptions.RequestException:
         return []
+
 
 def fix_file_iter(path: str, model: str = MODEL, show_changes: bool = False):
     yield "Читаю файл..."

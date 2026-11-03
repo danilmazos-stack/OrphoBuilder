@@ -4,7 +4,6 @@ from ollama_client import fix_text_iter, fix_image_iter, fix_file_iter, list_mod
 EXAMPLES = [
     ["Я вчира пошол в магазин и купил хлеп."],
     ["Their going to the store tomorow, and I seen him yesterday."],
-    ["мы все живём в москве. я люблю свой горат."],
 ]
 
 
