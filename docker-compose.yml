@@ -1,0 +1,48 @@
+services:
+  ollama:
+    image: ollama/ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: textfixer
+      POSTGRES_PASSWORD: textfixer
+      POSTGRES_DB: textfixer
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U textfixer"]
+      interval: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  api:
+    build: .
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    volumes:
+      - ./dicts:/code/dicts
+    ports:
+      - "8000:8000"
+
+  ui:
+    build: .
+    command: python -m app.ui.gradio_app
+    env_file: .env
+    depends_on:
+      - api
+    ports:
+      - "7860:7860"
+
+volumes:
+  ollama_data:
+  pg_data:
