@@ -1,5 +1,6 @@
 import gradio as gr
 from app.services.llm import fix_text_iter, fix_image_iter, fix_file_iter, list_models, MODEL
+from app.services.llm import analyze, OllamaError
 
 EXAMPLES = [
     ["Я вчира пошол в магазин и купил хлеп."],
@@ -10,6 +11,14 @@ EXAMPLES = [
 def get_models():
     models = list_models()
     return models if models else [MODEL]
+
+def process_json(text, model):
+    if not text or not text.strip():
+        return {}
+    try:
+        return analyze(text, model)
+    except OllamaError as e:
+        return {"error": str(e)}
 
 
 def process_text(text, model, show_changes):
@@ -70,6 +79,9 @@ with gr.Blocks(title="Исправление ошибок") as demo:
         text_btn.click(process_text, [text_in, model, show_changes], text_out)
         text_in.submit(process_text, [text_in, model, show_changes], text_out)
         text_clear.click(lambda: ("", ""), None, [text_in, text_out])
+        json_btn = gr.Button("Показать JSON")
+        json_out = gr.JSON(label="JSON")
+        json_btn.click(process_json, [text_in, model], json_out)
 
     with gr.Tab("Картинка"):
         with gr.Row():

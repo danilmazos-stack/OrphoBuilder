@@ -232,18 +232,50 @@ def _format(original: str, corrected: str, show_changes: bool) -> str:
 
 # ---------- то, что вызывает интерфейс (генераторы: результат идёт по частям) ----------
 
-def fix_text_iter(text: str, model: str = MODEL, show_changes: bool = False):
+def correct_iter(text: str, model: str = MODEL):
+    """Отдаёт исправленный текст по мере готовности, без оформления."""
+    if USE_YANDEX:
+        try:
+            text = spell.yandex_fix(text)
+        except requests.exceptions.RequestException:
+            raise OllamaError("Яндекс.Спеллер недоступен. Проверьте интернет.")
+        yield text
+
     parts = re.split(r"(\n+|(?<=[.!?…])[ \t]+)", text)
     result = list(parts)
+    for i, part in enumerate(parts):
+        if i % 2 or not part.strip():
+            continue
+        piece = part
+        if _needs_model(piece):
+            piece = _correct_chunk(piece, model)
+        result[i] = piece
+        yield "".join(result)
+
+
+def fix_text_iter(text: str, model: str = MODEL, show_changes: bool = False):
+    corrected = text
     try:
-        for i, part in enumerate(parts):
-            if i % 2 == 0 and _needs_model(part):
-                result[i] = _correct_chunk(part, model)
-                yield "".join(result)
+        for corrected in correct_iter(text, model):
+            yield corrected
     except OllamaError as e:
         yield str(e)
         return
-    yield _format(text, "".join(result), show_changes)
+    yield _format(text, corrected, show_changes)
+
+
+def analyze(text: str, model: str = MODEL) -> dict:
+    """Полный результат в виде словаря (для JSON)."""
+    corrected = text
+    for corrected in correct_iter(text, model):
+        pass
+    changes = [{"was": w, "now": n, "type": _label(w, n)} for w, n in _diff(text, corrected)]
+    return {
+        "original": text,
+        "corrected": corrected,
+        "changes": changes,
+        "errors_found": len(changes),
+    }
 
 
 def fix_image_iter(image_path: str, model: str = MODEL, show_changes: bool = False):
@@ -268,6 +300,8 @@ def list_models() -> list[str]:
         return [m["name"] for m in r.json()["models"]]
     except requests.exceptions.RequestException:
         return []
+
+
 
 
 def fix_file_iter(path: str, model: str = MODEL, show_changes: bool = False):

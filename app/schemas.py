@@ -7,6 +7,15 @@ class TextRequest(BaseModel):
     show_changes: bool = False
 
 
+class Change(BaseModel):
+    was: str
+    now: str
+    type: str
+
+
 class CorrectionResponse(BaseModel):
-    result: str
+    original: str
+    corrected: str
+    changes: list[Change]
+    errors_found: int
     duration_ms: int

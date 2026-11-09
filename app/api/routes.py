@@ -39,16 +39,17 @@ def _save(db: Session, source: str, original: str, result: str, started: float) 
 def correct(req: TextRequest, db: Session = Depends(get_db)):
     if not req.text.strip():
         raise HTTPException(400, "Пустой текст")
-    if req.mode != "correct":
-        raise HTTPException(501, "Этот режим пока не реализован")
     started = time.time()
-    result = pipeline.run(req.text, req.show_changes)
-    return CorrectionResponse(result=result, duration_ms=_save(db, "text", req.text, result, started))
+    try:
+        data = pipeline.run(req.text)
+    except llm.OllamaError as e:
+        raise HTTPException(503, str(e))
+    ms = _save(db, "text", req.text, data["corrected"], started)
+    return CorrectionResponse(**data, duration_ms=ms)
 
 
 @router.post("/correct/file", response_model=CorrectionResponse)
-def correct_file(file: UploadFile = File(...), show_changes: bool = False,
-                 db: Session = Depends(get_db)):
+def correct_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED:
         raise HTTPException(400, f"Формат {ext or '?'} не поддерживается")
@@ -67,8 +68,12 @@ def correct_file(file: UploadFile = File(...), show_changes: bool = False,
     if not original:
         raise HTTPException(422, "В файле не найден текст")
 
-    result = pipeline.run(original, show_changes)
-    return CorrectionResponse(result=result, duration_ms=_save(db, "file", original, result, started))
+    try:
+        result = pipeline.run(original)
+    except llm.OllamaError as e:
+        raise HTTPException(503, str(e))
+    ms = _save(db, "file", original, result["corrected"], started)
+    return CorrectionResponse(**result, duration_ms=ms)
 
 
 @router.get("/history")
