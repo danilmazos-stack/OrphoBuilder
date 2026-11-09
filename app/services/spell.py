@@ -87,3 +87,32 @@ def suggest(word: str, limit: int = 8) -> list[str]:
         if s not in result:
             result.append(s)
     return result
+
+YANDEX_URL = "https://speller.yandex.net/services/spellservice.json/checkText"
+
+
+def _apply(line: str, errors: list[dict]) -> str:
+    # заменяем с конца строки, чтобы позиции не сдвигались
+    for e in sorted(errors, key=lambda e: e["pos"], reverse=True):
+        if e.get("code") == 2 or not e.get("s"):  # 2 = повтор слова, не трогаем
+            continue
+        line = line[: e["pos"]] + e["s"][0] + line[e["pos"] + e["len"]:]
+    return line
+
+
+def yandex_fix(text: str) -> str:
+    """Исправляет орфографию через Яндекс.Спеллер (русский и английский)."""
+    session = requests.Session()
+    out = []
+    for line in text.split("\n"):
+        if not line.strip():
+            out.append(line)
+            continue
+        r = session.post(
+            YANDEX_URL,
+            data={"text": line, "lang": "ru,en", "options": 6},  # 6 = игнорировать цифры и ссылки
+            timeout=30,
+        )
+        r.raise_for_status()
+        out.append(_apply(line, r.json()))
+    return "\n".join(out)

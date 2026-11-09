@@ -3,7 +3,7 @@ import re
 import pytesseract
 from PIL import Image, ImageOps, ImageStat
 
-TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+from app.config import TESSERACT_CMD
 LANGS = "rus+eng"
 PSM = 3  # 3 = авто (абзацы), 6 = один сплошной блок текста
 
@@ -31,7 +31,7 @@ def _prepare(img: Image.Image) -> Image.Image:
 
 def read_text(path: str) -> str:
     try:
-        img = _prepare(Image.open(path))
+        img = _prepare(path if isinstance(path, Image.Image) else Image.open(path))
         data = pytesseract.image_to_data(
             img, lang=LANGS, config=CONFIG, output_type=pytesseract.Output.DICT
         )
